@@ -144,8 +144,47 @@ export perform_action!, revert_action!
 include("IO/IO.jl")
 using .IO: XYZ, EXYZ, LAMMPS, load_configuration, load_chains
 export XYZ, EXYZ, LAMMPS, load_configuration, load_chains
-export ComputeRotation, StorePhiTrajectories, StoreLastPhiFrame
+export ComputeRotation, StorePhiTrajectories, StoreLastPhiFrame, load_phi_frame
 
+
+"""
+    find_latest_backup(output_path, n_chains) -> (t_start::Int, ext::String)
+
+Scan `output_path/chains/1/` for checkpoint files written by `StoreBackups`
+(named `restart_t{t}.xyz` or `restart_t{t}.exyz`). Returns the step `t` of
+the most recent checkpoint and its extension, or `(0, "")` if none exist.
+"""
+function find_latest_backup(output_path::String, n_chains::Int)
+    dir = joinpath(output_path, "chains", "1")
+    isdir(dir) || return (0, "")
+    best_t = 0
+    best_ext = ""
+    for ext in (".exyz", ".xyz")
+        for f in readdir(dir)
+            m = match(Regex("^restart_t(\\d+)\\$(ext)\$"), f)
+            if m !== nothing
+                t = parse(Int, m.captures[1])
+                if t > best_t
+                    best_t = t
+                    best_ext = ext
+                end
+            end
+        end
+    end
+    return (best_t, best_ext)
+end
+
+"""
+    maybe_resubmit(t, steps, submit_command)
+
+Call `submit_command` (via the shell) when there is still work to do (`t < steps`).
+Does nothing when `submit_command` is `nothing`.
+"""
+function maybe_resubmit(t::Int, steps::Int, submit_command::Union{Nothing,String})
+    isnothing(submit_command) && return
+    t < steps || return
+    run(Cmd(split(submit_command)))
+end
 
 """
 ParticlesMC implemented in Comonicon.
@@ -169,10 +208,7 @@ ParticlesMC implemented in Comonicon.
     if model === nothing
         model = params["model"]
     end  # optional field
-    if !isfile(config) && !isdir(config)
-        error("Configuration file '$config' does not exist in the current path.")
-    end
-    filename = isdir(config) ? filename = system["filename"] : "" # if the config is a directory then one need to specify the root of the filenames in toml (include that in README?)
+    filename = isdir(config) ? system["filename"] : ""
     list_type = get(system, "list_type", "LinkedList")  # optional field
     list_parameters = get(system, "list_parameters", nothing)  # optional field
     bonds = get(system, "bonds", nothing)
@@ -185,34 +221,66 @@ ParticlesMC implemented in Comonicon.
     parallel = sim["parallel"]
     output_path = get(sim, "output_path", "./")
 
-    # Setup RNG and basic variables
+    # Checkpoint / restart parameters (absent = normal run, no checkpoints)
+    trestart       = get(sim, "trestart", nothing)
+    submit_command = get(sim, "submit_command", nothing)
 
-    # optional field
+    # ── Auto-detect restart ───────────────────────────────────────────────────
+    t_start    = 0
+    is_restart = false
+    phi_states = nothing   # per-chain rotation states, loaded when restarting
 
-    if bonds !== nothing
-        chains = load_chains(config, args=Dict(
-            "temperature" => temperature,
-            "density" => density,
-            "model" => model,
-            "list_type" => list_type,
-            "list_parameters" => list_parameters,
-            "bonds" => bonds,
-        ),
-        filename=filename,
-        )
-    else
-        chains = load_chains(config, args=Dict(
-            "temperature" => temperature,
-            "density" => density,
-            "model" => model,
-            "list_type" => list_type,
-            "list_parameters" => list_parameters,
-        ),
-        filename=filename,
-        )
+    if !isnothing(trestart)
+        n_chains_hint = isfile(config) ? 1 : length(readdir(config))
+        t_start, ckpt_ext = find_latest_backup(output_path, n_chains_hint)
+        if t_start >= steps
+            println("Simulation already complete (checkpoint at t=$t_start, steps=$steps). Nothing to do.")
+            return
+        end
+        if t_start > 0
+            is_restart = true
+            println("Checkpoint found at t=$t_start — resuming simulation.")
+        end
     end
+
+    # ── Load chains ───────────────────────────────────────────────────────────
+    load_args = Dict(
+        "temperature"     => temperature,
+        "density"         => density,
+        "model"           => model,
+        "list_type"       => list_type,
+        "list_parameters" => list_parameters,
+    )
+    bonds !== nothing && (load_args["bonds"] = bonds)
+
+    if is_restart
+        # Load each chain from its own checkpoint file
+        n_chains = length([f for f in readdir(joinpath(output_path, "chains"))
+                           if isdir(joinpath(output_path, "chains", f))])
+        ckpt_files = [joinpath(output_path, "chains", "$c", "restart_t$(t_start)$(ckpt_ext)")
+                      for c in 1:n_chains]
+        all(isfile, ckpt_files) || error("Checkpoint files missing for t=$t_start")
+        # load_chains accepts a directory; build a temp path containing the files
+        # Since each chain file is separate we load them individually and collect
+        chains = vcat([load_chains(f, args=load_args) for f in ckpt_files]...)
+
+        # Load rotation state if present
+        phi_paths = [joinpath(output_path, "chains", "$c", "lastphiframe.dat")
+                     for c in 1:n_chains]
+        if all(isfile, phi_paths)
+            phi_states = [load_phi_frame(p) for p in phi_paths]
+            println("Rotation checkpoint loaded from lastphiframe.dat")
+        end
+    else
+        if !isfile(config) && !isdir(config)
+            error("Configuration file '$config' does not exist in the current path.")
+        end
+        chains = load_chains(config, args=load_args, filename=filename)
+    end
+
     algorithm_list = []
-    # Setup moves
+
+    # ── Setup moves ───────────────────────────────────────────────────────────
     pool = []
     for move in sim["move"]
         prob = move["probability"]
@@ -221,7 +289,6 @@ ParticlesMC implemented in Comonicon.
         parameters = get(move, "parameters", Dict())
         param_obj = ComponentArray()
 
-        # Create action object
         if action == "Displacement"
             action_obj = Displacement(0, zero(chains[1].box), 0.0)
             if "sigma" in keys(parameters)
@@ -251,9 +318,6 @@ ParticlesMC implemented in Comonicon.
             else
                 error("Missing parameter 'species' for action: $action")
             end
-
-            # Use a system to initialize (chains[1])
-            # This is because the action needs the number of particles for each species
             action_obj = DiscreteSwap(species, chains[1])
             param_obj = Vector{Float64}()
             if policy == "DoubleUniform"
@@ -264,13 +328,13 @@ ParticlesMC implemented in Comonicon.
         else
             error("Unsupported action: $action")
         end
-        # Build move
         move_obj = Move(action_obj, policy_obj, param_obj, prob)
         push!(pool, move_obj)
     end
     push!(algorithm_list, (algorithm=Metropolis, pool=pool, seed=seed, parallel=parallel, sweepstep=length(chains[1])))
 
-    # Setup observables
+    # ── Setup observables ─────────────────────────────────────────────────────
+    has_compute_rotation = false
     for observable in get(sim, "observable", [])
         alg = observable["algorithm"]
         scheduler_params = observable["scheduler_params"]
@@ -282,14 +346,16 @@ ParticlesMC implemented in Comonicon.
                 algorithm=ComputeRotation,
                 scheduler=sched,
                 theta_T=theta_T,
+                initial_state=phi_states,   # nothing on fresh start; per-chain states on restart
             )
+            has_compute_rotation = true
         else
             error("Unsupported observable algorithm: $alg")
         end
         push!(algorithm_list, algorithm)
     end
 
-    # Setup outputs
+    # ── Setup outputs ─────────────────────────────────────────────────────────
     for output in sim["output"]
         alg = output["algorithm"]
         scheduler_params = output["scheduler_params"]
@@ -303,6 +369,7 @@ ParticlesMC implemented in Comonicon.
                 algorithm=eval(Meta.parse(alg)),
                 callbacks=callbacks,
                 scheduler=sched,
+                restart=is_restart,
             )
         elseif alg == "StoreAcceptance"
             dependencies = map(d -> eval(Meta.parse("$d")), dependencies)
@@ -310,18 +377,21 @@ ParticlesMC implemented in Comonicon.
                 algorithm=eval(Meta.parse(alg)),
                 dependencies=dependencies,
                 scheduler=sched,
+                restart=is_restart,
             )
         elseif alg == "StoreTrajectories" || alg == "StoreLastFrames"
             algorithm = (
                 algorithm=eval(Meta.parse(alg)),
                 scheduler=sched,
                 fmt=eval(Meta.parse("$(fmt)()")),
+                restart=is_restart,
             )
         elseif alg == "StorePhiTrajectories" || alg == "StoreLastPhiFrame"
             algorithm = (
                 algorithm=eval(Meta.parse(alg)),
                 scheduler=sched,
                 path=output_path,
+                restart=is_restart,
             )
         elseif alg == "PrintTimeSteps"
             algorithm = (
@@ -333,9 +403,28 @@ ParticlesMC implemented in Comonicon.
         end
         push!(algorithm_list, algorithm)
     end
-    M = 1
+
+    # ── Auto-add checkpoint algorithms when trestart is set ───────────────────
+    if !isnothing(trestart)
+        checkpoint_sched = build_schedule(steps, t_start, trestart)
+        on_ckpt = t -> maybe_resubmit(t, steps, submit_command)
+        push!(algorithm_list, (
+            algorithm  = StoreBackups,
+            scheduler  = checkpoint_sched,
+            fmt        = EXYZ(),
+            on_checkpoint = on_ckpt,
+        ))
+        if has_compute_rotation
+            push!(algorithm_list, (
+                algorithm = StoreLastPhiFrame,
+                scheduler = checkpoint_sched,
+                path      = output_path,
+            ))
+        end
+    end
+
     path = joinpath(output_path)
-    simulation = Simulation(chains, algorithm_list, steps; path=path, verbose=true)
+    simulation = Simulation(chains, algorithm_list, steps; t_start=t_start, path=path, verbose=true)
 
     # Run the simulation
     run!(simulation)
