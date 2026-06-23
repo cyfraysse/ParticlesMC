@@ -407,7 +407,13 @@ ParticlesMC implemented in Comonicon.
     # ── Auto-add checkpoint algorithms when trestart is set ───────────────────
     if !isnothing(trestart)
         checkpoint_sched = build_schedule(steps, t_start, trestart)
-        on_ckpt = t -> maybe_resubmit(t, steps, submit_command)
+        submitted = Ref(false)
+        on_ckpt = t -> begin
+            if !submitted[] && !isnothing(submit_command) && t < steps
+                maybe_resubmit(t, steps, submit_command)
+                submitted[] = true
+            end
+        end
         push!(algorithm_list, (
             algorithm  = StoreBackups,
             scheduler  = checkpoint_sched,
