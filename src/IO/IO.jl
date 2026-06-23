@@ -380,6 +380,16 @@ function Arianna.store_trajectory(io, system::Molecules, t, format::Arianna.Form
     return nothing
 end
 
+function Arianna.store_backup(io, system::Molecules, t, format::Arianna.Format; digits::Integer=6)
+    write_header(io, system, t, format, digits)
+    for (molecule, species, position) in zip(system.molecule, system.species, system.position)
+        print(io, "$molecule $species")
+        write_position(io, position, digits)
+    end
+    store_bonds(io, system, format)
+    return nothing
+end
+
 function Arianna.store_lastframe(io, system::Molecules, t, format::Arianna.Format; digits::Integer=6)
     write_header(io, system, t, format, digits)
     for (molecule, species, position) in zip(system.molecule, system.species, system.position)
