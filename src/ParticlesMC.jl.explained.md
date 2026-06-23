@@ -74,18 +74,19 @@ If `submit_command` is set in the TOML and `t < steps`, Julia calls:
 run(Cmd(split(submit_command)))
 ```
 This submits the next job to the cluster. The submitted job runs the same
-TOML — it will find the latest checkpoint and fast-forward to it.
+TOML — it will find the latest checkpoint and resume from there.
 
-**Important — one submission per job:** resubmission fires only **once** per
-job execution, at the first checkpoint of that run. A flag `submitted = Ref(false)`
-is closed over by the `on_checkpoint` callback and flipped to `true` after the
-first call. Subsequent checkpoints in the same job are skipped.
+**Each job runs exactly `trestart` steps, then exits cleanly.** This is
+enforced by passing `job_steps = min(steps, t_start + trestart)` to the
+`Simulation` constructor instead of the full `steps`. The simulation reaches
+`job_steps`, writes one checkpoint, submits the next job, and terminates
+normally — no wall-time kill needed, no overlap between jobs.
 
-Why does this matter? Without the flag, a job that lives long enough to pass
-through multiple checkpoints submits a new job at each one, which then each
-submit more jobs — an exponential cascade. With the flag, each job submits
-exactly one successor, which fast-forwards to whatever the latest checkpoint is
-when it starts.
+The chain looks like:
+- Job 001: t = 0 → trestart, checkpoint, submit Job 002, exit
+- Job 002: t = trestart → 2×trestart, checkpoint, submit Job 003, exit
+- …
+- Last job: t = (n-1)×trestart → steps, checkpoint (t = steps → no submit), exit
 
 ### What is NOT saved (and why it is OK)
 
