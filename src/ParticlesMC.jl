@@ -405,19 +405,17 @@ ParticlesMC implemented in Comonicon.
     end
 
     # ── Auto-add checkpoint algorithms when trestart is set ───────────────────
+    # Each job runs exactly trestart steps: t_start+1 … t_start+trestart, then
+    # exits cleanly. The next job picks up from there. No overlap between jobs.
+    job_steps = !isnothing(trestart) ? min(steps, t_start + trestart) : steps
+
     if !isnothing(trestart)
         checkpoint_sched = build_schedule(steps, t_start, trestart)
-        submitted = Ref(false)
-        on_ckpt = t -> begin
-            if !submitted[] && !isnothing(submit_command) && t < steps
-                maybe_resubmit(t, steps, submit_command)
-                submitted[] = true
-            end
-        end
+        on_ckpt = t -> maybe_resubmit(t, steps, submit_command)
         push!(algorithm_list, (
-            algorithm  = StoreBackups,
-            scheduler  = checkpoint_sched,
-            fmt        = EXYZ(),
+            algorithm     = StoreBackups,
+            scheduler     = checkpoint_sched,
+            fmt           = EXYZ(),
             on_checkpoint = on_ckpt,
         ))
         if has_compute_rotation
@@ -430,7 +428,7 @@ ParticlesMC implemented in Comonicon.
     end
 
     path = joinpath(output_path)
-    simulation = Simulation(chains, algorithm_list, steps; t_start=t_start, path=path, verbose=true)
+    simulation = Simulation(chains, algorithm_list, job_steps; t_start=t_start, path=path, verbose=true)
 
     # Run the simulation
     run!(simulation)
