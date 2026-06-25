@@ -340,7 +340,15 @@ ParticlesMC implemented in Comonicon.
         push!(algorithm_list, algorithm)
     end
 
-    # ── Auto-add StoreLastPhiFrame when ComputeRotation is present ───────────
+    # ── Auto-add checkpoint algorithms ───────────────────────────────────────
+    # StoreLastFrames is required by Arianna when t_restart is set; add it with
+    # EXYZ so detect_restart(output_path, EXYZ()) finds the right file.
+    if !isnothing(t_restart)
+        has_lf = any(c -> haskey(c, :algorithm) && c.algorithm === StoreLastFrames, algorithm_list)
+        if !has_lf
+            push!(algorithm_list, (algorithm=StoreLastFrames, fmt=EXYZ()))
+        end
+    end
     if has_compute_rotation
         push!(algorithm_list, (
             algorithm = StoreLastPhiFrame,
