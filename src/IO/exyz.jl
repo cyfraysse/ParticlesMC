@@ -94,3 +94,13 @@ function write_header(io, system::Particles, t, format::EXYZ, digits::Integer)
     println(io, "Lattice=\"$box_str\" Properties=$(get_system_column(system, format)):species:S:1:pos:R:$(system.d) Time=$t")
     return nothing
 end
+
+function Arianna.read_t_from_lastframe(path::String, ::EXYZ)
+    open(path) do f
+        readline(f)  # N — number of atoms
+        comment = readline(f)
+        m = match(r"Time=(\d+)", comment)
+        isnothing(m) && error("No Time= field in EXYZ lastframe header: $path")
+        return parse(Int, m.captures[1])
+    end
+end

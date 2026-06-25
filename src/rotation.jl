@@ -88,17 +88,15 @@ RotationState{T}() where {T} = RotationState{T}([], [], [], false)
 mutable struct ComputeRotation{T} <: AriannaAlgorithm
     theta_T::Vector{T}                  # one per method
     states::Vector{RotationState{T}}    # one per chain
-    initial_state::Any                  # loaded phi checkpoint or nothing
 end
 
 function ComputeRotation(chains;
                      theta_T::Vector{Float64}=[π/4],
                      scheduler::Vector{Int}=Int[],
-                     initial_state=nothing,
                      kwargs...)
     n = length(chains)
     states = [RotationState{Float64}() for _ in 1:n]
-    return ComputeRotation{Float64}(theta_T, states, initial_state)
+    return ComputeRotation{Float64}(theta_T, states)
 end
     
 ##### Initialisation of the simulation #####
@@ -106,6 +104,16 @@ end
 ##########                        ##########
 
 function Arianna.initialise(algorithm::ComputeRotation, simulation::Simulation)
+    phi_states = nothing
+    if simulation.t_start > 0
+        phi_paths = [joinpath(simulation.path, "chains", "$c", "lastphiframe.dat")
+                     for c in eachindex(simulation.chains)]
+        if all(isfile, phi_paths)
+            phi_states = [load_phi_frame(p) for p in phi_paths]
+            simulation.verbose && println("Rotation checkpoint loaded from lastphiframe.dat")
+        end
+    end
+
     for c in eachindex(simulation.chains)
         system = simulation.chains[c]
         state  = algorithm.states[c]
@@ -113,13 +121,11 @@ function Arianna.initialise(algorithm::ComputeRotation, simulation::Simulation)
         N_mol  = system.Nmol
         n_θ    = length(algorithm.theta_T)
 
-        # R_bodyframe is always computed from current positions
         state.R_bodyframe = Vector{SMatrix{3,3,T,9}}(undef, N_mol)
         get_all_body_frames!(state.R_bodyframe, system)
 
-        if !isnothing(algorithm.initial_state)
-            # Restart: restore accumulators from per-chain checkpoint
-            phi_state = algorithm.initial_state[c]
+        if !isnothing(phi_states)
+            phi_state = phi_states[c]
             state.R_ref   = [[SMatrix{3,3,T,9}(phi_state.R_ref[k][m])   for m in 1:N_mol] for k in 1:n_θ]
             state.Φ_acc   = [[SVector{3,T}(phi_state.Phi_acc[k][m])     for m in 1:N_mol] for k in 1:n_θ]
             state.initialized = true
@@ -128,7 +134,6 @@ function Arianna.initialise(algorithm::ComputeRotation, simulation::Simulation)
                 system.Φ[k] = [SVector{3,T}(phi_state.Phi[k][m]) for m in 1:N_mol]
             end
         else
-            # Fresh start: initialise accumulators to zero
             state.R_ref   = [copy(state.R_bodyframe) for _ in 1:n_θ]
             state.Φ_acc   = [[zero(SVector{3,T}) for _ in 1:N_mol] for _ in 1:n_θ]
             state.initialized = true
@@ -184,25 +189,24 @@ struct StorePhiTrajectories <: AriannaAlgorithm
     files::Vector{Vector{IOStream}}     # files[c][k]
     store_first::Bool
     store_last::Bool
-    restart::Bool
 
-    function StorePhiTrajectories(chains, path; store_first::Bool=true, store_last::Bool=false, restart::Bool=false)
+    function StorePhiTrajectories(chains, path; store_first::Bool=true, store_last::Bool=false)
         dirs  = joinpath.(path, "chains", ["$(c)" for c in eachindex(chains)])
         mkpath.(dirs)
         n     = length(chains)
         paths = [String[] for _ in 1:n]
         files = [IOStream[] for _ in 1:n]
-        return new(dirs, paths, files, store_first, store_last, restart)
+        return new(dirs, paths, files, store_first, store_last)
     end
 end
 
-function StorePhiTrajectories(chains; path=missing, store_first=true, store_last=false, restart=false, kwargs...)
-    return StorePhiTrajectories(chains, path; store_first=store_first, store_last=store_last, restart=restart)
+function StorePhiTrajectories(chains; path=missing, store_first=true, store_last=false, kwargs...)
+    return StorePhiTrajectories(chains, path; store_first=store_first, store_last=store_last)
 end
 
 function Arianna.initialise(algorithm::StorePhiTrajectories, simulation::Simulation)
     simulation.verbose && println("Opening Φ trajectory files...")
-    mode = algorithm.restart ? "a" : "w"
+    mode = simulation.t_start > 0 ? "a" : "w"
     for c in eachindex(simulation.chains)
         system = simulation.chains[c]
         n_θ    = length(system.Φ)
@@ -210,7 +214,7 @@ function Arianna.initialise(algorithm::StorePhiTrajectories, simulation::Simulat
                                for k in 1:n_θ]
         algorithm.files[c] = open.(algorithm.paths[c], mode)
     end
-    algorithm.store_first && !algorithm.restart && Arianna.make_step!(simulation, algorithm)
+    algorithm.store_first && simulation.t_start == 0 && Arianna.make_step!(simulation, algorithm)
 end
 
 function Arianna.make_step!(simulation::Simulation, algorithm::StorePhiTrajectories)
@@ -292,10 +296,6 @@ function _write_phi_frame_checkpoint(algorithm::StoreLastPhiFrame, simulation::S
         end
     end
     return nothing
-end
-
-function Arianna.make_step!(simulation::Simulation, algorithm::StoreLastPhiFrame)
-    _write_phi_frame_checkpoint(algorithm, simulation)
 end
 
 function Arianna.finalise(algorithm::StoreLastPhiFrame, simulation::Simulation)

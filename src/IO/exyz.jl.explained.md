@@ -72,3 +72,27 @@ The `Lattice=` field always has 9 numbers (a 3×3 matrix), even for 2D systems
 where the third diagonal entry is 0. The reader extracts the diagonal
 `[Lx, Ly, Lz]` and then truncates to match the position dimensionality:
 if `pos:R:2`, box becomes `[Lx, Ly]`.
+
+---
+
+## read_t_from_lastframe — the restart hook
+
+```julia
+function Arianna.read_t_from_lastframe(path::String, ::EXYZ)
+    open(path) do f
+        readline(f)      # skip N
+        comment = readline(f)
+        m = match(r"Time=(\d+)", comment)
+        return parse(Int, m.captures[1])
+    end
+end
+```
+
+This overrides the generic Arianna function for EXYZ files. Arianna's `detect_restart` calls
+it when looking for `lastframe.exyz` at the start of a new job.
+
+`Time=t` in the comment line is the MC step at which the job ended (written by
+`StoreLastFrames.finalise`). Reading it back gives `t_start` for the next job.
+
+The default Arianna version expects `t` as the first comma-separated field (DAT format).
+EXYZ stores it differently — embedded in a metadata string — so it needs its own parser.
