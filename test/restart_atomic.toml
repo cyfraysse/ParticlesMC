@@ -1,0 +1,42 @@
+# T1-T4: restart test for atomic system (EXYZ)
+# steps=1000, t_restart=300 → 4 jobs of 300 steps (last stops at 1000)
+
+[system]
+config = "config_0.exyz"
+temperature = 0.231
+density = 1.192060351952634
+model = "JBB"
+list_type = "LinkedList"
+
+[simulation]
+type = "Metropolis"
+steps = 1000
+t_restart = 300
+seed = 42
+parallel = false
+output_path = "data/test/restart_atomic"
+
+[[simulation.move]]
+action = "Displacement"
+probability = 1.0
+policy = "SimpleGaussian"
+parameters = {sigma = 0.05}
+
+[[simulation.output]]
+algorithm = "StoreCallbacks"
+callbacks = ["energy"]
+scheduler_params = {linear_interval = 100}
+
+[[simulation.output]]
+algorithm = "StoreTrajectories"
+scheduler_params = {linear_interval = 100}
+fmt = "EXYZ"
+
+[[simulation.output]]
+algorithm = "StoreLastFrames"
+scheduler_params = {linear_interval = 100}
+fmt = "EXYZ"
+
+[[simulation.output]]
+algorithm = "PrintTimeSteps"
+scheduler_params = {linear_interval = 100}

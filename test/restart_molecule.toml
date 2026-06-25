@@ -1,0 +1,47 @@
+# T5: restart test for molecular system with ComputeRotation
+# steps=600, t_restart=300 → 2 jobs
+
+[system]
+config = "molecule.exyz"
+temperature = 2.0
+density = 1.2
+model = "Trimer"
+list_type = "LinkedList"
+
+[simulation]
+type = "Metropolis"
+steps = 600
+t_restart = 300
+seed = 42
+parallel = false
+output_path = "data/test/restart_molecule"
+
+[[simulation.move]]
+action = "Displacement"
+probability = 1.0
+policy = "SimpleGaussian"
+parameters = {sigma = 0.05}
+
+[[simulation.observable]]
+algorithm = "ComputeRotation"
+scheduler_params = {linear_interval = 1}
+[simulation.observable.parameters]
+theta_T = [0.7853981633974483]
+
+[[simulation.output]]
+algorithm = "StoreCallbacks"
+callbacks = ["energy"]
+scheduler_params = {linear_interval = 10}
+
+[[simulation.output]]
+algorithm = "StorePhiTrajectories"
+scheduler_params = {linear_interval = 10}
+
+[[simulation.output]]
+algorithm = "StoreLastFrames"
+scheduler_params = {linear_interval = 10}
+fmt = "EXYZ"
+
+[[simulation.output]]
+algorithm = "PrintTimeSteps"
+scheduler_params = {linear_interval = 50}
