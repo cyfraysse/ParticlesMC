@@ -206,8 +206,16 @@ ParticlesMC implemented in Comonicon.
 
     # optional field
 
+    if restart
+        chains_dir = joinpath(output_path, "chains")
+        cdirs = sort(readdir(chains_dir); by = s -> parse(Int, s))   # "1","2",…,"10" in NUMERIC order
+        load_path = [joinpath(chains_dir, c, "lastframe$(fmt_ckpt.extension)") for c in cdirs]
+    else
+        load_path = config
+    end
+
     if bonds !== nothing
-        chains = load_chains(config, args=Dict(
+        chains = load_chains(load_path, args=Dict(
             "temperature" => temperature,
             "density" => density,
             "model" => model,
@@ -218,7 +226,7 @@ ParticlesMC implemented in Comonicon.
         filename=filename,
         )
     else
-        chains = load_chains(config, args=Dict(
+        chains = load_chains(load_path, args=Dict(
             "temperature" => temperature,
             "density" => density,
             "model" => model,
@@ -356,7 +364,8 @@ ParticlesMC implemented in Comonicon.
     simulation = Simulation(chains, algorithm_list, steps; t_start=t_start, path=path, verbose=true)
 
     # Run the simulation
-    run!(simulation; wall_time=wall_time)
+    status = run!(simulation; wall_time=wall_time)
+    exit(status == :need_restart ? 1 : 0) # if t did not reached steps then a 1 flag is exit in order to restart the simulation through a bash script
 
 end
 
