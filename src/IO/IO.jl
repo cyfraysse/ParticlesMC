@@ -210,7 +210,9 @@ end
 
 function load_chains(init_path; args=Dict(), filename="", verbose=false)
     input_files = Vector{String}()
-    if isfile(init_path)
+    if init_path isa AbstractVector # to keep job ordered in order to well restart the simulations
+        append!(input_files,init_path)
+    elseif isfile(init_path)
         push!(input_files, init_path)
     elseif isdir(init_path)
         for (root, dirs, files) in walkdir(init_path)
