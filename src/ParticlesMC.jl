@@ -183,7 +183,24 @@ ParticlesMC implemented in Comonicon.
     burn = get(sim, "burn", 0)
     seed = sim["seed"]
     parallel = sim["parallel"]
+    wall_time = get(sim, "restart", Inf) # restart if specified in toml else Inf to run uncapped
     output_path = get(sim, "output_path", "./")
+
+    function restart_format(sim)
+        for output in get(sim,"output",[])
+            if output["algorithm"] == "StoreLastFrames"
+                return eval(Meta.parse("$(get(output,"fmt","XYZ"))()"))
+            end
+        end
+        return nothing
+    end
+
+    # detection of a restart or fresh start
+    restart_enabled = isfinite(wall_time)
+    fmt_ckpt  = restart_enabled ? restart_format(sim) : nothing
+    lastframe = isnothing(fmt_ckpt) ? "" : joinpath(output_path, "chains", "1", "lastframe$(fmt_ckpt.extension)")
+    t_start   = (fmt_ckpt !== nothing && isfile(lastframe)) ? load_configuration(lastframe)[:t] : 0
+    restart   = t_start > 0
 
     # Setup RNG and basic variables
 
@@ -324,6 +341,7 @@ ParticlesMC implemented in Comonicon.
                 path=output_path,
             )
         elseif alg == "PrintTimeSteps"
+            
             algorithm = (
                 algorithm=eval(Meta.parse(alg)),
                 scheduler=sched,
@@ -335,10 +353,10 @@ ParticlesMC implemented in Comonicon.
     end
     M = 1
     path = joinpath(output_path)
-    simulation = Simulation(chains, algorithm_list, steps; path=path, verbose=true)
+    simulation = Simulation(chains, algorithm_list, steps; t_start=t_start, path=path, verbose=true)
 
     # Run the simulation
-    run!(simulation)
+    run!(simulation; wall_time=wall_time)
 
 end
 
