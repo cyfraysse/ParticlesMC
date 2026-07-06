@@ -306,7 +306,7 @@ ParticlesMC implemented in Comonicon.
             algorithm  = (
                 algorithm=ComputeRotation,
                 scheduler=sched,
-                theta_T=theta_T,
+                θ_T=theta_T,
             )
         else
             error("Unsupported observable algorithm: $alg")
