@@ -40,7 +40,7 @@ end
 
 function load_configuration(io, format::Arianna.Format; m=1)
     data = readlines(io)
-    N, box, column_info, metadata = read_header(data, format)
+    t, N, box, column_info, metadata = read_header(data, format) # add t_start
     selrow = get_selrow(format, N, m)
     frame = data[selrow:selrow+N-1]
     bool_molecule = "molecule" in keys(column_info)
@@ -90,7 +90,8 @@ function load_configuration(io, format::Arianna.Format; m=1)
         :box => box,
         :species => species,
         :position => position,
-        :metadata => metadata
+        :metadata => metadata,
+        :t => t
     )
     if bool_molecule
         config_dict[:molecule] = molecule
