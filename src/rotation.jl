@@ -188,12 +188,13 @@ function Arianna.initialise(algorithm::StorePhiTrajectories, simulation::Simulat
     simulation.verbose && println("Opening Φ trajectory files...")
     for c in eachindex(simulation.chains)
         system = simulation.chains[c]
+        writing_mode = simulation.t_start > 0 ? "a" : "w"
         n_θ    = length(system.Φ)
         algorithm.paths[c] = [joinpath(algorithm.dirs[c], "phitrajectories_$k.dat")
                                for k in 1:n_θ]
-        algorithm.files[c] = open.(algorithm.paths[c], "w")
+        algorithm.files[c] = open.(algorithm.paths[c], writing_mode)
     end
-    algorithm.store_first && Arianna.make_step!(simulation, algorithm)
+    (simulation.t_start == 0 && algorithm.store_first) && Arianna.make_step!(simulation, algorithm)
 end
 
 function Arianna.make_step!(simulation::Simulation, algorithm::StorePhiTrajectories)
