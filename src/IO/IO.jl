@@ -208,7 +208,7 @@ function broadcast_dict(dicts, key)
     return [dict[key] for dict in dicts]
 end
 
-function load_chains(init_path; args=Dict(), filename="", verbose=false)
+function load_chains(init_path; args=Dict(), filename="", verbose=false, fold=true)
     input_files = Vector{String}()
     if init_path isa AbstractVector # to keep job ordered in order to well restart the simulations
         append!(input_files,init_path)
@@ -284,7 +284,9 @@ function load_chains(init_path; args=Dict(), filename="", verbose=false)
     end
 
     # Fold back into the box
-    initial_position_array .= [[fold_back(x, box) for x in X] for (X, box) in zip(initial_position_array, initial_box_array)]
+    if fold
+        initial_position_array .= [[fold_back(x, box) for x in X] for (X, box) in zip(initial_position_array, initial_box_array)]
+    end
 
     # Copy configurations nsim times (replicas)
     if haskey(args, "nsim") && !isnothing(args["nsim"]) && args["nsim"] > 1
