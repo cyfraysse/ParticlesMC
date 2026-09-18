@@ -224,6 +224,7 @@ ParticlesMC implemented in Comonicon.
             "bonds" => bonds,
         ),
         filename=filename,
+        fold=!restart,
         )
     else
         chains = load_chains(load_path, args=Dict(
@@ -234,6 +235,7 @@ ParticlesMC implemented in Comonicon.
             "list_parameters" => list_parameters,
         ),
         filename=filename,
+        fold=!restart,
         )
     end
     algorithm_list = []
